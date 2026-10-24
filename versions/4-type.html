@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate">
+<meta name="googlebot" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#000000">
+<title>digital playground</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Cpath d='M0 3h16v1H0zM0 6h16v3H0zM0 11h16v1H0zM0 13h16v2H0z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/HostGrotesk.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  @font-face { font-family: "Host Grotesk"; src: url("fonts/HostGrotesk.woff2") format("woff2"); font-weight: 300 800; font-display: swap; }
+  :root { --black: #000000; --white: #ffffff; --grey: #9a9a9a; color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--black); color: var(--white); overflow: hidden; }
+  body { font-family: "Host Grotesk", "Helvetica Neue", Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .hud {
+    position: fixed; inset: 0; z-index: 2; pointer-events: none;
+    padding: calc(20px + env(safe-area-inset-top, 0px)) 24px calc(20px + env(safe-area-inset-bottom, 0px));
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 24px;
+    font-size: 15px; line-height: 20px; font-weight: 500; letter-spacing: -0.005em;
+  }
+  .hud > * { background: var(--black); padding: 6px 10px; margin: -6px -10px; }
+  .hud span { display: block; }
+  .clock { white-space: nowrap; }
+  @media (max-width: 560px) { .hud { font-size: 13px; line-height: 18px; } }
+  .caption { position: fixed; z-index: 2; pointer-events: none; left: 24px; right: 24px; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    font-size: 15px; line-height: 20px; font-weight: 500; display: flex; justify-content: space-between; gap: 24px; }
+  @media (max-width: 560px) { .caption { font-size: 13px; line-height: 18px; } }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Large white type reading rukitis.com digital playground, sliced into strips that shift with the pointer."></canvas>
+<div class="caption">
+  <span>rukitis.com / digital playground</span>
+  <span id="clock">--:--:--</span>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  let W = 0, H = 0, DPR = 1;
+  const P = { x: -1, y: -1, sx: -1, sy: -1, active: false, down: false };
+
+  const clock = document.getElementById('clock');
+  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Riga', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const tick = () => { clock.textContent = `${fmt.format(new Date())} riga`; };
+  tick(); setInterval(tick, 250);
+
+  canvas.addEventListener('pointermove', e => { P.x = e.clientX; P.y = e.clientY; P.active = true; if (P.down && window.onDrag) onDrag(); });
+  canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); P.down = true; P.x = e.clientX; P.y = e.clientY; P.active = true; if (window.onPress) onPress(); });
+  const up = e => { P.down = false; if (e.pointerType !== 'mouse') P.active = false; };
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', up);
+  canvas.addEventListener('pointerleave', () => { P.active = false; });
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    if (P.sx < 0) { P.sx = W / 2; P.sy = H / 2; }
+    if (window.onResize) onResize();
+  }
+  let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 120); });
+
+
+  const TEXT = 'RUKITIS.COM DIGITAL PLAYGROUND';
+  const text = document.createElement('canvas'); const tg = text.getContext('2d');
+  let slices = [];
+  function layout() {
+    text.width = Math.round(W * DPR); text.height = Math.round(H * DPR);
+    tg.setTransform(DPR, 0, 0, DPR, 0, 0);
+    tg.fillStyle = '#000'; tg.fillRect(0, 0, W, H);
+    const top = 16, bottom = 64, avail = H - top - bottom;
+    // pick the line count whose type size fills both width and height best
+    tg.font = `500 100px "Host Grotesk", Helvetica, Arial, sans-serif`;
+    const total = tg.measureText(TEXT.replace(/ /g, '')).width;
+    let best = null;
+    for (let n = 2; n <= 9; n++) {
+      const size = 100 * (W * 1.06) / (total / n);
+      const fit = Math.abs(size * 0.82 * n - avail);
+      if (size * 0.82 * n <= avail * 1.04 && (!best || fit < best.fit)) best = { n, size, fit };
+    }
+    if (!best) best = { n: 9, size: avail / 9 / 0.82 };
+    const size = best.size, n = best.n;
+    tg.font = `500 ${size}px "Host Grotesk", Helvetica, Arial, sans-serif`;
+    tg.fillStyle = '#fff'; tg.textBaseline = 'alphabetic';
+    // break across lines like the poster, ignoring word boundaries; edges get cropped
+    const chars = TEXT.replace(/ /g, '').split(''); const per = tg.measureText(TEXT.replace(/ /g, '')).width / n;
+    const lines = []; let cur = '', acc = '';
+    for (const ch of chars) {
+      // break where the running width crosses the next equal share, rounding to the nearest letter
+      const before = tg.measureText(acc).width, after = tg.measureText(acc + ch).width;
+      const mark = per * (lines.length + 1);
+      if (cur && lines.length < n - 1 && (before + after) / 2 > mark) { lines.push(cur); cur = ''; }
+      cur += ch; acc += ch;
+    }
+    lines.push(cur);
+    const lh = avail / n;
+    lines.forEach((s, k) => tg.fillText(s, -size * 0.05, top + lh * (k + 1) - lh * 0.1));
+    slices = []; let y = 0;
+    while (y < H) { const h = pick([3, 6, 8, 12, 16, 24, 40]); slices.push({ y, h, off: 0, target: 0 }); y += h; }
+  }
+  window.onResize = layout; window.onFonts = layout;
+  let glitchUntil = 0;
+  function glitch() {
+    if (reduce) return;
+    const a = Math.floor(rand(0, slices.length - 6)), n = Math.floor(rand(2, 7));
+    const amt = pick([-1, 1]) * rand(16, 96);
+    for (let k = a; k < a + n; k++) slices[k].kick = Math.round(amt / 8) * 8;
+    glitchUntil = performance.now() + rand(250, 700);
+  }
+  setInterval(glitch, 4200);
+  window.onPress = () => { for (const s of slices) if (Math.abs(s.y - P.y) < 120) s.kick = Math.round(rand(-200, 200) / 8) * 8; glitchUntil = performance.now() + 600; };
+  let lastX = 0, vx = 0;
+  function draw(t) {
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    vx += ((P.x - lastX) - vx) * 0.3; lastX = P.x;
+    const now = performance.now();
+    if (now > glitchUntil) for (const s of slices) s.kick = 0;
+    for (const s of slices) {
+      let target = s.kick || 0;
+      if (P.active && !reduce) {
+        const d = Math.abs(s.y + s.h / 2 - P.y);
+        const k = Math.max(0, 1 - d / 90);
+        target += Math.round((vx * 3 * k) / 8) * 8;
+      }
+      s.off += (target - s.off) * 0.25;
+      const o = Math.round(s.off / 4) * 4;
+      ctx.drawImage(text, 0, s.y * DPR, W * DPR, s.h * DPR, o, s.y, W, s.h);
+    }
+  }
+
+
+  resize();
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05); last = now;
+    P.sx += (P.x - P.sx) * 0.15; P.sy += (P.y - P.sy) * 0.15;
+    draw(now / 1000, dt);
+    requestAnimationFrame(frame);
+  }
+  const start = () => requestAnimationFrame(frame);
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(() => { if (window.onFonts) onFonts(); start(); });
+})();
+</script>
+</body>
+</html>

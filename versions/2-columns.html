@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate">
+<meta name="googlebot" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#000000">
+<title>digital playground</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Cpath d='M0 3h16v1H0zM0 6h16v3H0zM0 11h16v1H0zM0 13h16v2H0z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/HostGrotesk.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  @font-face { font-family: "Host Grotesk"; src: url("fonts/HostGrotesk.woff2") format("woff2"); font-weight: 300 800; font-display: swap; }
+  :root { --black: #000000; --white: #ffffff; --grey: #9a9a9a; color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--black); color: var(--white); overflow: hidden; }
+  body { font-family: "Host Grotesk", "Helvetica Neue", Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  .hud {
+    position: fixed; inset: 0; z-index: 2; pointer-events: none;
+    padding: calc(20px + env(safe-area-inset-top, 0px)) 24px calc(20px + env(safe-area-inset-bottom, 0px));
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 24px;
+    font-size: 15px; line-height: 20px; font-weight: 500; letter-spacing: -0.005em;
+  }
+  .hud > * { background: var(--black); padding: 6px 10px; margin: -6px -10px; }
+  .hud span { display: block; }
+  .clock { white-space: nowrap; }
+  @media (max-width: 560px) { .hud { font-size: 13px; line-height: 18px; } }
+
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Vertical panels of horizontal stripes drifting at different speeds. Hover a panel to invert it, click to change it."></canvas>
+<div class="hud">
+  <div><span>rukitis.com</span><span>digital playground</span></div>
+  <div class="clock" id="clock">--:--:--</div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  let W = 0, H = 0, DPR = 1;
+  const P = { x: -1, y: -1, sx: -1, sy: -1, active: false, down: false };
+
+  const clock = document.getElementById('clock');
+  const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Riga', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const tick = () => { clock.textContent = `${fmt.format(new Date())} riga`; };
+  tick(); setInterval(tick, 250);
+
+  canvas.addEventListener('pointermove', e => { P.x = e.clientX; P.y = e.clientY; P.active = true; if (P.down && window.onDrag) onDrag(); });
+  canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); P.down = true; P.x = e.clientX; P.y = e.clientY; P.active = true; if (window.onPress) onPress(); });
+  const up = e => { P.down = false; if (e.pointerType !== 'mouse') P.active = false; };
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', up);
+  canvas.addEventListener('pointerleave', () => { P.active = false; });
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    if (P.sx < 0) { P.sx = W / 2; P.sy = H / 2; }
+    if (window.onResize) onResize();
+  }
+  let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 120); });
+
+
+  let cols = [];
+  function stripes(h, kind) {
+    const c = document.createElement('canvas'); c.width = 4; c.height = h;
+    const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, 4, h); g.fillStyle = '#fff';
+    let y = 0;
+    if (kind === 'fine') { while (y < h) { const on = Math.random() < 0.5; const s = 1 + Math.floor(Math.random() * 3); if (on) g.fillRect(0, y, 4, s); y += s + Math.floor(rand(1, 6)); } }
+    else if (kind === 'coarse') { while (y < h) { const s = Math.floor(rand(6, 120)); if (Math.random() < 0.4) g.fillRect(0, y, 4, s); y += s + Math.floor(rand(2, 30)); } }
+    else if (kind === 'sparse') { while (y < h) { if (Math.random() < 0.6) g.fillRect(0, y, 4, pick([1, 1, 2, 3])); y += Math.floor(rand(8, 60)); } }
+    else if (kind === 'white') { g.fillRect(0, 0, 4, h); }
+    return c;
+  }
+  function makeCol(x, w) {
+    const kind = pick(['fine', 'fine', 'fine', 'coarse', 'coarse', 'sparse', 'sparse', 'black']);
+    const len = Math.round(rand(H * 0.8, H * 2.2));
+    return { x, w, kind, pat: stripes(len, kind), off: rand(0, len), v: kind === 'white' || kind === 'black' ? 0 : pick([-1, 1]) * rand(4, 40), inv: 0 };
+  }
+  window.onResize = () => {
+    cols = []; let x = 0; const n = W < 560 ? 5 : 9;
+    while (x < W) { const w = Math.round((W / n) * rand(0.5, 1.6)); cols.push(makeCol(x, Math.min(w, W - x))); x += w; }
+  };
+  const colAt = x => cols.find(c => x >= c.x && x < c.x + c.w);
+  window.onPress = () => { const c = colAt(P.x); if (c) Object.assign(c, makeCol(c.x, c.w)); };
+  // every few seconds one panel cuts to a new pattern
+  setInterval(() => { if (reduce || !cols.length) return; const c = pick(cols); Object.assign(c, makeCol(c.x, c.w)); }, 3200);
+  function draw(t, dt) {
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    for (const c of cols) {
+      const hit = P.active && P.x >= c.x && P.x < c.x + c.w;
+      c.inv += ((hit ? 1 : 0) - c.inv) * 0.25;
+      if (!reduce) c.off += c.v * dt * (1 + c.inv * 4);
+      if (c.kind !== 'black') {
+        const len = c.pat.height;
+        let y = -(((c.off % len) + len) % len);
+        for (; y < H; y += len) ctx.drawImage(c.pat, 0, 0, 4, len, c.x, Math.round(y), c.w, len);
+      }
+      if (c.inv > 0.5) { ctx.globalCompositeOperation = 'difference'; ctx.fillStyle = '#fff'; ctx.fillRect(c.x, 0, c.w, H); ctx.globalCompositeOperation = 'source-over'; }
+    }
+  }
+
+
+  resize();
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05); last = now;
+    P.sx += (P.x - P.sx) * 0.15; P.sy += (P.y - P.sy) * 0.15;
+    draw(now / 1000, dt);
+    requestAnimationFrame(frame);
+  }
+  const start = () => requestAnimationFrame(frame);
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(() => { if (window.onFonts) onFonts(); start(); });
+})();
+</script>
+</body>
+</html>
