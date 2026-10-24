@@ -77,16 +77,17 @@
   const B8 = [0,32,8,40,2,34,10,42,48,16,56,24,50,18,58,26,12,44,4,36,14,46,6,38,60,28,52,20,62,30,54,22,3,35,11,43,1,33,9,41,51,19,59,27,49,17,57,25,15,47,7,39,13,45,5,37,63,31,55,23,61,29,53,21].map(v => (v + 0.5) / 64);
 
   const PX = () => (W < 560 ? 3 : 4);       // dither pixel size, like tooooools "pixel size"
-  let gw = 0, gh = 0, img, buf, blobs = [], field = null, lo = 1, hi = 2, primed = false;
+  let gw = 0, gh = 0, img, buf, blobs = [], field = null, grain = null, lo = 1, hi = 2, primed = false;
   const low = document.createElement('canvas'); const lg = low.getContext('2d');
 
   function blob(big) {
     const r = big ? rand(0.16, 0.34) : Math.pow(Math.random(), 1.8) * 0.1 + 0.025;
-    return { x: rand(0, 1), y: rand(0, 1), r, vx: rand(-1, 1) * 0.012 / (r * 6), vy: rand(-1, 1) * 0.008 / (r * 6), ph: rand(0, 6.28), w: rand(0.3, 1.1) };
+    return { x: rand(0, 1), y: rand(0, 1), r, vx: rand(-1, 1) * 0.005 / (r * 6), vy: rand(-1, 1) * 0.0035 / (r * 6), ph: rand(0, 6.28), w: rand(0.3, 1.1) };
   }
   window.onResize = () => {
     const p = PX(); gw = Math.ceil(W / p); gh = Math.ceil(H / p);
     low.width = gw; low.height = gh; img = lg.createImageData(gw, gh); buf = img.data;
+    grain = new Float32Array(gw * gh); for (let i = 0; i < grain.length; i++) grain[i] = (Math.random() - 0.5) * 0.1;
     if (!blobs.length) { for (let i = 0; i < 5; i++) blobs.push(blob(true)); for (let i = 0; i < 22; i++) blobs.push(blob(false)); }
   };
   window.onPress = () => { const b = blob(Math.random() < 0.3); b.x = P.x / W; b.y = P.y / H; b.vx *= 0.3; b.vy *= 0.3; blobs.push(b); if (blobs.length > 40) blobs.splice(5, 1); };
@@ -110,7 +111,7 @@
     const asp = W / H, tt = reduce ? 0 : t;
     // move the blobs; they wrap around the edges
     if (!reduce) for (const b of blobs) {
-      b.x += (b.vx + Math.sin(tt * 0.3 + b.ph) * 0.004) * dt; b.y += (b.vy + Math.cos(tt * 0.23 + b.ph) * 0.004) * dt;
+      b.x += (b.vx + Math.sin(tt * 0.12 + b.ph) * 0.002) * dt; b.y += (b.vy + Math.cos(tt * 0.09 + b.ph) * 0.002) * dt;
       if (b.x < -0.4) b.x += 1.8; if (b.x > 1.4) b.x -= 1.8; if (b.y < -0.4) b.y += 1.8; if (b.y > 1.4) b.y -= 1.8;
     }
     // the pointer carries its own shape that merges with whatever it touches
@@ -118,7 +119,7 @@
     if (P.active && P.sx >= 0) list.push({ x: P.sx / W, y: P.sy / H, r: 0.085, w: 1 });
 
     const n = list.length, bx = new Float32Array(n), by = new Float32Array(n), br = new Float32Array(n);
-    for (let i = 0; i < n; i++) { const b = list[i]; bx[i] = b.x * asp; by[i] = b.y; const breathe = 1 + Math.sin(tt * 0.6 + (b.ph || 0)) * 0.08; br[i] = (b.r * breathe) ** 2; }
+    for (let i = 0; i < n; i++) { const b = list[i]; bx[i] = b.x * asp; by[i] = b.y; const breathe = 1 + Math.sin(tt * 0.25 + (b.ph || 0)) * 0.04; br[i] = (b.r * breathe) ** 2; }
 
     if (!field || field.length !== gw * gh) field = new Float32Array(gw * gh);
     let k = 0;
@@ -130,22 +131,23 @@
         let f = 0;
         for (let i = 0; i < n; i++) { const dx = u - bx[i], dy = v - by[i]; f += br[i] / (dx * dx + dy * dy + 0.0004); }
         // ragged edges: low-frequency warp
-        f *= 0.7 + noise(x * 0.035 + tt * 0.15, y * 0.035 - tt * 0.1) * 0.6;
+        f *= 0.7 + noise(x * 0.035 + tt * 0.04, y * 0.035 - tt * 0.03) * 0.6;
         field[k++] = f;
       }
     }
     // keep roughly half the screen pale, like the photos: thresholds come from the field itself
     const S = 600, smp = new Float32Array(S);
-    for (let i = 0; i < S; i++) smp[i] = field[(Math.random() * field.length) | 0];
+    const stride = Math.max(1, Math.floor(field.length / S));
+    for (let i = 0; i < S; i++) smp[i] = field[Math.min(field.length - 1, i * stride + ((i * 7919) % stride))];
     smp.sort();
-    const ease = primed ? 0.05 : 1; primed = true;
+    const ease = primed ? 0.01 : 1; primed = true;
     const tLo = lo += (smp[(S * 0.44) | 0] - lo) * ease, tHi = hi += (smp[(S * 0.58) | 0] - hi) * ease;
     const span = Math.max(tHi - tLo, 1e-6);
     k = 0; let q = 0;
     for (let y = 0; y < gh; y++) {
       for (let x = 0; x < gw; x++) {
         // black point / white point: only a narrow band becomes the dithered gradient
-        let g = (field[q++] - tLo) / span + (Math.random() - 0.5) * 0.18;
+        let g = (field[q++] - tLo) / span + grain[q - 1];
         const on = g > B8[(y & 7) * 8 + (x & 7)];
         const c = on ? PAPER : INK;
         buf[k++] = c[0]; buf[k++] = c[1]; buf[k++] = c[2]; buf[k++] = 255;
